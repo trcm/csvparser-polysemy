@@ -15,8 +15,10 @@ import           Prelude                 hiding ( readFile
 import           Data.ByteString                ( ByteString
                                                 , readFile
                                                 )
+import Control.Monad 
 import           Data.ByteString.Char8          ( lines )
 import           Polysemy
+import           Polysemy.State
 import           Polysemy.Input
 import           Polysemy.Output
 import           Polysemy.Error
@@ -98,4 +100,4 @@ ingest = input @(Maybe Record) >>= \case
 
 someFunc :: IO ()
 someFunc = do
-  ingest & csvInput "test.csv" & localFileProvider & transformOutput & runRedis & runWriter & runM
+  ingest & csvInput "test.csv" & localFileProvider & batch 5 & transformOutput & runRedis & runWriter & runM
