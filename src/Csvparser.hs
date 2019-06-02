@@ -65,7 +65,9 @@ localFileProvider = interpret $ \case
 -- Take output effects and intepret them as writer effects
 transformOutput :: (Show i) => Sem (Output i ': r) a -> Sem (RedisProvider ': (Writer ': r)) a
 transformOutput = reinterpret2 $ \case
-  Output i -> writeFile i >> updateRedis i
+  Output i -> do
+    writeFile i
+    updateRedis (Stat 1)
 
 -- Handle writer effects
 runWriter :: Show a => Member (Lift IO) r => Sem (Writer ': r) a -> Sem r a
@@ -99,12 +101,12 @@ batch batchSize m = case batchSize of
 
 -- Ingest sets up the initial input and ouput types
 -- we need to interpret these somehow.
-ingest :: (Member (Input (Maybe Record)) r, Member (Output Record) r) => Sem r ()
+ingest :: (Member (Input (Maybe Record)) r, Member (Output Record) r, Member (Output Stat) r) => Sem r ()
 ingest = input @(Maybe Record) >>= \case
   Nothing     -> pure ()
   Just record -> do
     output @Record record
-    -- output @Stat 1
+    output @Stat 1
     ingest
 
 someFunc :: IO ()
