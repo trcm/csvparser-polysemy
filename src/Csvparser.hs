@@ -15,7 +15,7 @@ import           Prelude                 hiding ( readFile
 import           Data.ByteString                ( ByteString
                                                 , readFile
                                                 )
-import Control.Monad 
+import           Control.Monad
 import           Data.ByteString.Char8          ( lines )
 import           Polysemy
 import           Polysemy.State
@@ -27,9 +27,16 @@ import           Polysemy.Trace
 import           Data.Function
 
 data Record = Record ByteString deriving Show
+data Stat = Stat Int deriving Show
 
 data FileProvider m a where
   OpenFile :: FilePath -> FileProvider m ByteString
+
+data CsvParserError = ParseError String
+                    | SendError String
+                    | StatError String
+                    | OtherError String
+                    deriving (Show)
 
 makeSem ''FileProvider
 
@@ -65,29 +72,30 @@ runWriter :: Show a => Member (Lift IO) r => Sem (Writer ': r) a -> Sem r a
 runWriter = interpret $ \case
   WriteFile a -> sendM $ putStrLn $ show a
 
-runRedis :: Member (Lift IO) r => Sem (RedisProvider ': r) a -> Sem r a
+runRedis :: (Member (Lift IO) r, Member (Error CsvParserError) r) => Sem (RedisProvider ': r) a -> Sem r a
 runRedis = interpret $ \case
   UpdateRedis a -> sendM $ do
     putStrLn "updating redis"
 
 batch :: forall o r a . Int -> Sem (Output o ': r) a -> Sem (Output [o] ': r) a
 batch batchSize m = case batchSize of
-  0 -> raise $ runIgnoringOutput m 
+  0 -> raise $ runIgnoringOutput m
   _ -> do
     (leftOver, a) <- runState ([] :: [o]) $ reinterpret2
       (\case
-          Output o -> do
-            acc <- get
-            case length acc of
-              n | n == batchSize -> do
-                    output acc
-                    put [o]
-                | otherwise -> put (acc <> [o])
+        Output o -> do
+          acc <- get
+          case length acc of
+            n
+              | n == batchSize -> do
+                output acc
+                put [o]
+              | otherwise -> put (acc <> [o])
       )
       m
     when (length leftOver > 0) $ output leftOver
     pure a
-  
+
 
 -- Ingest sets up the initial input and ouput types
 -- we need to interpret these somehow.
@@ -96,8 +104,18 @@ ingest = input @(Maybe Record) >>= \case
   Nothing     -> pure ()
   Just record -> do
     output @Record record
+    -- output @Stat 1
     ingest
 
 someFunc :: IO ()
 someFunc = do
-  ingest & csvInput "test.csv" & localFileProvider & batch 5 & transformOutput & runRedis & runWriter & runM
+  a <- ingest
+    & csvInput "test.csv"
+    & localFileProvider
+    & batch 5
+    & transformOutput
+    & runRedis
+    & runWriter
+    & runError @CsvParserError
+    & runM
+  either (putStrLn . show) pure a
